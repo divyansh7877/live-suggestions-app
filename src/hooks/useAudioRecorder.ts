@@ -30,19 +30,53 @@ export function useAudioRecorder({
 }: UseAudioRecorderOptions) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef(false);
+  const flushResolverRef = useRef<((blob: Blob | null) => void) | null>(null);
 
-  const flush = useCallback(() => {
-    if (chunksRef.current.length === 0) return;
-    const mimeType = mediaRecorderRef.current?.mimeType || getSupportedMimeType();
-    const blob = new Blob(chunksRef.current, { type: mimeType });
-    chunksRef.current = [];
-    if (blob.size > 0) {
-      onChunkReady(blob);
-    }
-  }, [onChunkReady]);
+  // Groq Whisper needs a self-contained, decodable file. A single
+  // MediaRecorder writes container headers only at start and a cues
+  // block at stop, so slicing a live stream with `timeslice` yields
+  // header-less fragments that Whisper rejects. Instead we run one
+  // recorder per chunk: stop produces a complete file, then we
+  // immediately start a fresh recorder on the same live MediaStream.
+  const startNewRecorder = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+
+    const mimeType = getSupportedMimeType();
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: Blob[] = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const type = recorder.mimeType || mimeType;
+      const blob = chunks.length > 0 ? new Blob(chunks, { type }) : null;
+      const payload = blob && blob.size > 0 ? blob : null;
+
+      const resolver = flushResolverRef.current;
+      if (resolver) {
+        flushResolverRef.current = null;
+        resolver(payload);
+      } else if (payload) {
+        onChunkReady(payload);
+      }
+
+      if (isRecordingRef.current) {
+        startNewRecorder();
+      }
+    };
+
+    recorder.onerror = () => {
+      onError("Recording error occurred");
+    };
+
+    mediaRecorderRef.current = recorder;
+    recorder.start();
+  }, [onChunkReady, onError]);
 
   const start = useCallback(async () => {
     try {
@@ -55,27 +89,18 @@ export function useAudioRecorder({
         },
       });
       streamRef.current = stream;
-
-      const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onerror = () => {
-        onError("Recording error occurred");
-      };
-
-      recorder.start(1000);
       isRecordingRef.current = true;
+      startNewRecorder();
 
       intervalRef.current = setInterval(() => {
-        if (isRecordingRef.current && chunksRef.current.length > 0) {
-          flush();
+        const recorder = mediaRecorderRef.current;
+        if (
+          isRecordingRef.current &&
+          recorder &&
+          recorder.state === "recording" &&
+          flushResolverRef.current === null
+        ) {
+          recorder.stop();
         }
       }, chunkDurationMs);
     } catch (err) {
@@ -85,35 +110,58 @@ export function useAudioRecorder({
         onError("Failed to access microphone. Check your browser settings.");
       }
     }
-  }, [chunkDurationMs, flush, onError]);
+  }, [chunkDurationMs, startNewRecorder, onError]);
 
   const stop = useCallback(() => {
     isRecordingRef.current = false;
+
+    if (flushResolverRef.current) {
+      flushResolverRef.current(null);
+      flushResolverRef.current = null;
+    }
 
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      // onstop will fire once more and emit the final chunk via
+      // onChunkReady; it won't restart because isRecordingRef is false.
+      recorder.stop();
     }
-
-    flush();
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
     mediaRecorderRef.current = null;
-  }, [flush]);
+  }, []);
 
-  const manualFlush = useCallback(() => {
-    if (isRecordingRef.current && mediaRecorderRef.current) {
-      mediaRecorderRef.current.requestData();
-      setTimeout(() => flush(), 100);
+  const manualFlush = useCallback((): Promise<Blob | null> => {
+    const recorder = mediaRecorderRef.current;
+    if (!isRecordingRef.current || !recorder || recorder.state !== "recording") {
+      return Promise.resolve(null);
     }
-  }, [flush]);
+    return new Promise<Blob | null>((resolve) => {
+      flushResolverRef.current = resolve;
+      try {
+        recorder.stop();
+      } catch {
+        flushResolverRef.current = null;
+        resolve(null);
+        return;
+      }
+      // Safety net in case onstop never fires.
+      setTimeout(() => {
+        if (flushResolverRef.current === resolve) {
+          flushResolverRef.current = null;
+          resolve(null);
+        }
+      }, 2000);
+    });
+  }, []);
 
   useEffect(() => {
     return () => {

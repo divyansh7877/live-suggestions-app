@@ -10,9 +10,15 @@ interface TranscriptPanelProps {
 
 export default function TranscriptPanel({ chunks, isRecording }: TranscriptPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
   }, [chunks]);
 
   return (
@@ -23,7 +29,7 @@ export default function TranscriptPanel({ chunks, isRecording }: TranscriptPanel
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {chunks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-muted">
             <p className="text-sm">
