@@ -1,6 +1,8 @@
 "use client";
 
 import { ChatMessage as ChatMessageType } from "@/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -18,10 +20,12 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             : "bg-surface-light border border-border text-text-primary"
         }`}
       >
-        <div className="text-sm leading-relaxed whitespace-pre-wrap">
-          {message.content}
+        <div className="markdown text-sm leading-relaxed">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.content}
+          </ReactMarkdown>
           {message.isStreaming && (
-            <span className="inline-flex gap-0.5 ml-1">
+            <span className="inline-flex gap-0.5 ml-1 align-middle">
               <span className="typing-dot w-1 h-1 rounded-full bg-current" />
               <span className="typing-dot w-1 h-1 rounded-full bg-current" />
               <span className="typing-dot w-1 h-1 rounded-full bg-current" />
