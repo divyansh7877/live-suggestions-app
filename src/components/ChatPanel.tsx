@@ -14,11 +14,18 @@ interface ChatPanelProps {
 export default function ChatPanel({ messages, isStreaming, onSend }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, messages[messages.length - 1]?.content]);
+    const el = scrollRef.current;
+    if (!el) return;
+    // Only follow the stream if user hasn't scrolled up to read history.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
+  }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +43,7 @@ export default function ChatPanel({ messages, isStreaming, onSend }: ChatPanelPr
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-muted">
             <p className="text-sm">

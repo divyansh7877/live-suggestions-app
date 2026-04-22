@@ -23,6 +23,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
   const pendingTranscribeRef = useRef(false);
+  const skipNextAutoGenerateRef = useRef(false);
 
   const handleChunkReady = useCallback(
     async (blob: Blob) => {
@@ -56,6 +57,10 @@ export default function Home() {
     const currentCount = state.transcriptChunks.length;
     if (currentCount > lastChunkCountRef.current && currentCount > 0) {
       lastChunkCountRef.current = currentCount;
+      if (skipNextAutoGenerateRef.current) {
+        skipNextAutoGenerateRef.current = false;
+        return;
+      }
       generate().catch((err) => {
         setError(err instanceof Error ? err.message : "Suggestion generation failed");
       });
@@ -90,19 +95,20 @@ export default function Home() {
     }
     try {
       setError(null);
-      manualFlush();
-      // Small delay to let the flush propagate
-      setTimeout(async () => {
-        try {
-          await generate();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Failed to generate suggestions");
+      if (state.isRecording) {
+        const blob = await manualFlush();
+        if (blob) {
+          // Suppress the auto-generate that fires when the new
+          // chunk lands in state — we'll call generate() ourselves.
+          skipNextAutoGenerateRef.current = true;
+          await transcribe(blob);
         }
-      }, 300);
+      }
+      await generate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Refresh failed");
     }
-  }, [state.settings.apiKey, manualFlush, generate]);
+  }, [state.settings.apiKey, state.isRecording, manualFlush, transcribe, generate]);
 
   const handleSuggestionClick = useCallback(
     (suggestion: Suggestion, batchId: string, index: number) => {

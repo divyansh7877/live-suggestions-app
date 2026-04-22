@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useReducer, useCallback } from "react";
+import React, { createContext, useContext, useReducer, useCallback, useEffect } from "react";
 import {
   SessionState,
   SessionSettings,
@@ -26,42 +26,36 @@ type Action =
   | { type: "SET_GENERATING_SUGGESTIONS"; payload: boolean }
   | { type: "SET_STREAMING_CHAT"; payload: boolean };
 
-function loadSettings(): SessionSettings {
-  if (typeof window === "undefined") {
-    return {
-      apiKey: "",
-      suggestPrompt: DEFAULT_SUGGEST_PROMPT,
-      detailPrompt: DEFAULT_DETAIL_PROMPT,
-      chatPrompt: DEFAULT_CHAT_PROMPT,
-      ...DEFAULT_SETTINGS,
-    };
-  }
+const defaultSettings: SessionSettings = {
+  apiKey: "",
+  suggestPrompt: DEFAULT_SUGGEST_PROMPT,
+  detailPrompt: DEFAULT_DETAIL_PROMPT,
+  chatPrompt: DEFAULT_CHAT_PROMPT,
+  ...DEFAULT_SETTINGS,
+};
+
+function loadSettingsFromStorage(): SessionSettings | null {
+  if (typeof window === "undefined") return null;
   try {
     const saved = localStorage.getItem("ls-settings");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        apiKey: parsed.apiKey || "",
-        suggestPrompt: parsed.suggestPrompt || DEFAULT_SUGGEST_PROMPT,
-        detailPrompt: parsed.detailPrompt || DEFAULT_DETAIL_PROMPT,
-        chatPrompt: parsed.chatPrompt || DEFAULT_CHAT_PROMPT,
-        suggestContextWindow: parsed.suggestContextWindow || DEFAULT_SETTINGS.suggestContextWindow,
-        detailContextWindow: parsed.detailContextWindow || DEFAULT_SETTINGS.detailContextWindow,
-        refreshInterval: parsed.refreshInterval || DEFAULT_SETTINGS.refreshInterval,
-      };
-    }
-  } catch {}
-  return {
-    apiKey: "",
-    suggestPrompt: DEFAULT_SUGGEST_PROMPT,
-    detailPrompt: DEFAULT_DETAIL_PROMPT,
-    chatPrompt: DEFAULT_CHAT_PROMPT,
-    ...DEFAULT_SETTINGS,
-  };
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    return {
+      apiKey: parsed.apiKey || "",
+      suggestPrompt: parsed.suggestPrompt || DEFAULT_SUGGEST_PROMPT,
+      detailPrompt: parsed.detailPrompt || DEFAULT_DETAIL_PROMPT,
+      chatPrompt: parsed.chatPrompt || DEFAULT_CHAT_PROMPT,
+      suggestContextWindow: parsed.suggestContextWindow || DEFAULT_SETTINGS.suggestContextWindow,
+      detailContextWindow: parsed.detailContextWindow || DEFAULT_SETTINGS.detailContextWindow,
+      refreshInterval: parsed.refreshInterval || DEFAULT_SETTINGS.refreshInterval,
+    };
+  } catch {
+    return null;
+  }
 }
 
 const initialState: SessionState = {
-  settings: loadSettings(),
+  settings: defaultSettings,
   isRecording: false,
   transcriptChunks: [],
   suggestionBatches: [],
@@ -137,6 +131,15 @@ const SessionContext = createContext<ContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Hydrate settings from localStorage after mount to keep SSR output
+  // deterministic (matches server render, avoiding hydration mismatch).
+  useEffect(() => {
+    const saved = loadSettingsFromStorage();
+    if (saved) {
+      dispatch({ type: "SET_SETTINGS", payload: saved });
+    }
+  }, []);
 
   const getFullTranscript = useCallback(() => {
     return state.transcriptChunks.map((c) => c.text).join("\n\n");
