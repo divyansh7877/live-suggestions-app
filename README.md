@@ -4,7 +4,7 @@ Real-time AI meeting copilot that listens to your mic, transcribes speech, surfa
 
 ## Demo
 
-[Deployed App](https://live-suggestions-app.vercel.app)
+[Deployed App]([(https://live-suggestions-app-six.vercel.app/)])
 
 ## Stack
 
